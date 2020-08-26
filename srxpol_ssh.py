@@ -10,7 +10,8 @@ import pyperclip
 
 
 # generate ready to use policy with mixed zones and scheduler
-# v1
+# do not create policy in DC phy if src zone IBS and dst untrust
+# do not create policy in DC4 if src zone VPN and dst untrust
 
 
 def func_random_str(str_length=8):  # Generate a random string of letters and digits
@@ -50,6 +51,7 @@ main(sys.argv[1:])  # handle script arguments
 file_rule = 'rule.txt'
 file_output = 'OUT-policy.jun'
 
+# =========================================
 list_src_hosts = []
 list_dst_hosts = []
 list_app = []
@@ -132,10 +134,10 @@ except FileNotFoundError:
     del_out_file()
     sys.exit(1)
 
-'''
 print('Choose device to connect:\n'
       '  1. dc2-srx550 (10.2.100.5)\n'
-      '  2. dc4-vSRX (172.20.251.8)\n')
+      '  2. dc4-vSRX (172.20.251.8)\n'
+      '  3. Enter your address\n')
 input1 = input('Enter number [1]: ')
 if input1 == '1':
     device_ip = '10.2.100.5'
@@ -143,15 +145,16 @@ elif input1 == '2':
     device_ip = '172.20.251.8'
 elif input1 == '':
     device_ip = '10.2.100.5'
+elif input1 == '3':
+    device_ip = input('Enter IP address or DNS name: ')
 else:
     print('incorrect choise!', input1)
     time.sleep(5)
     sys.exit(1)
-'''
 
 junos1 = {
-#    "host": device_ip,
-    "host": 'dc2-srx550',
+    "host": device_ip,
+#    "host": 'dc2-srx550',
     "username": credentials[user],
     "password": credentials[pwd],
     "device_type": "juniper",
@@ -191,7 +194,7 @@ def get_zone(addr_z):
         via_if = re.search(r'(?<=via\s).+', output1)  # match output interface name
         rt_net = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}', output1)  # match net address in output (0.0.0.0/0)
         net = rt_net.group(0)
-        command2 = "show interfaces " + str(via_if.group(0)) + ' | match zone'
+        command2 = "show interfaces " + str(via_if.group(0)) + ' | match Security:'
         output2 = net_connect.send_command(command2)
         zone_name = output2.split(':')[2].strip()
     except (AddressValueError, ValueError):
@@ -325,6 +328,7 @@ out_file.write('\n')
 
 # create policies
 policy_count = 0
+except_zone_list = ['untrust', 'IBS', 'VPN']  # no traffic flow
 for srcKey, srcValue in d_srcZoneIP.items():
     srcZoneIPlist = d_srcZoneIP[srcKey].split(',')
     for dstKey, dstValue in d_dstZoneIP.items():
@@ -333,6 +337,9 @@ for srcKey, srcValue in d_srcZoneIP.items():
             print('addresses belongs to the same zone - ' + srcKey + ':\n' +
                   'src: ' + srcValue + '\n' +
                   'dst: ' + dstValue + '\n')
+            continue
+        if srcKey in except_zone_list and dstKey in except_zone_list:
+            print(f'skip policy creation for zone pair: {srcKey} - {dstKey}')
             continue
         for srcZoneIP in srcZoneIPlist:  # policy source addresses
             if '0.0.0.0' in srcZoneIP:
