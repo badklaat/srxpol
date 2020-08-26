@@ -10,9 +10,10 @@ import pyperclip
 
 
 # generate ready to use policy with mixed zones and scheduler
+# v3:
 # do not create policy in DC phy if src zone IBS and dst untrust
 # do not create policy in DC4 if src zone VPN and dst untrust
-
+# use f-strings
 
 def func_random_str(str_length=8):  # Generate a random string of letters and digits
     letters_and_digits = string.ascii_letters + string.digits
@@ -23,26 +24,37 @@ rnd_string = func_random_str()
 policy_name = 'TMP_' + rnd_string
 policy_type = 'temporary'
 delta_days = None
+commit = 'no'  # no commit by default
+
+
+def print_help():
+    print(f'unknown options!\n'
+          f'usage:\n'
+          f'{sys.argv[0]} [-p <policy_name>] [-d <days>] [-c]\n'
+          f'-c: commit changes\n')
 
 
 def main(argv):
     global policy_name
     global policy_type
     global delta_days
+    global commit
     try:
-        opts, args = getopt.getopt(argv, "hp:d:")
+        opts, args = getopt.getopt(argv, "hp:d:c")
     except getopt.GetoptError:
-        print('unknown options!\nusage:\n' + sys.argv[0] + ' [-p <policy_name> -d <days>]')
+        print_help()
         sys.exit(1)
     for opt, arg in opts:
         if opt == '-h':
-            print('usage:\n' + sys.argv[0] + ' [-p <policy_name> -d <days>]')
+            print_help()
             sys.exit()
-        elif opt in '-p':
+        elif opt in '-p':  # create persistent policy with defined name
             policy_name = arg
             policy_type = 'persistent'
-        elif opt in '-d':
+        elif opt in '-d':  # set policy expiration
             delta_days = arg
+        elif opt == '-c':  # commit changes
+            commit = 'yes'
 
 
 main(sys.argv[1:])  # handle script arguments
@@ -50,6 +62,7 @@ main(sys.argv[1:])  # handle script arguments
 # define file names
 file_rule = 'rule.txt'
 file_output = 'OUT-policy.jun'
+file_cfg_test = 'junos-test.jun'
 
 # =========================================
 list_src_hosts = []
@@ -75,7 +88,7 @@ try:
                 for ap in linesplit:
                     list_app.append(ap)
 except FileNotFoundError:
-    print('file', file_rule, 'not found')
+    print(f'file {file_rule} not found')
     time.sleep(5)
     sys.exit(1)
 
@@ -97,16 +110,16 @@ def del_out_file():
 # create applications
 for dst_app in list_app:
     if re.match(r'\d{1,5}$', dst_app):  # match 12345
-        out_file.write('set applications application TCP-' + dst_app + ' protocol tcp destination-port ' + dst_app + '\n')
+        out_file.write(f'set applications application TCP-{dst_app} protocol tcp destination-port {dst_app}\n')
     elif re.match(r'(tcp|udp)+-\d{1,5}-\d{1,5}$', dst_app, flags=re.IGNORECASE):  # match tcp-12345-12400
         dproto = (dst_app.split('-')[0]).lower()
         dport_s = dst_app.split('-')[1]
         dport_e = dst_app.split('-')[2]
-        out_file.write('set applications application ' + dst_app.upper() + ' protocol ' + dproto + ' destination-port ' + dport_s + '-' + dport_e + '\n')
+        out_file.write(f'set applications application {dst_app.upper()} protocol {dproto} destination-port {dport_s}-{dport_e}\n')
     elif re.match(r'(tcp|udp)-\d{1,5}$', dst_app, flags=re.IGNORECASE):  # match tcp-12345
         dproto = (dst_app.split('-')[0]).lower()
         dport_s = dst_app.split('-')[1]
-        out_file.write('set applications application ' + dst_app.upper() + ' protocol ' + dproto + ' destination-port ' + dport_s + '\n')
+        out_file.write(f'set applications application {dst_app.upper()} protocol {dproto} destination-port {dport_s}\n')
     elif re.search(r'icmp', dst_app, flags=re.IGNORECASE):
         continue
     elif re.match(r'junos-', dst_app):
@@ -114,7 +127,7 @@ for dst_app in list_app:
     elif re.match(r'any', dst_app, flags=re.IGNORECASE):
         continue
     else:
-        print('unknown application', dst_app)
+        print(f'unknown application: {dst_app}')
         del_out_file()
         sys.exit(1)
 
@@ -129,7 +142,7 @@ try:
             credentials[user] = user
             credentials[pwd] = pwd
 except FileNotFoundError:
-    print('File', file_creds, 'not found')
+    print(f'File {file_creds} not found')
     time.sleep(5)
     del_out_file()
     sys.exit(1)
@@ -148,8 +161,8 @@ elif input1 == '':
 elif input1 == '3':
     device_ip = input('Enter IP address or DNS name: ')
 else:
-    print('incorrect choise!', input1)
-    time.sleep(5)
+    print(f'incorrect choise! {input1}')
+    #time.sleep(5)
     sys.exit(1)
 
 junos1 = {
@@ -163,7 +176,7 @@ junos1 = {
 
 # connecting to device
 try:
-    print('connecting to', junos1['host'])
+    print(f'connecting to {junos1["host"]}')
     net_connect = Netmiko(**junos1)
     dev_prompt = net_connect.find_prompt()
 except Exception as conn:
@@ -180,7 +193,7 @@ def get_zone(addr_z):
         try:
             dns_ip2 = socket.gethostbyname(addr_z)  # resolve IP domain name
         except socket.gaierror:
-            print('cannot resolve', addr_z)
+            print(f'cannot resolve {addr_z}')
             del_out_file()
             net_connect.disconnect()
             sys.exit(1)
@@ -198,7 +211,7 @@ def get_zone(addr_z):
         output2 = net_connect.send_command(command2)
         zone_name = output2.split(':')[2].strip()
     except (AddressValueError, ValueError):
-        print('incorrect address:', addr_z)
+        print(f'incorrect address: {addr_z}')
         del_out_file()
         net_connect.disconnect()
         sys.exit(1)
@@ -221,7 +234,7 @@ for h_s in list_src_hosts:
         h_s = h_s + '.brc.local'  # suggest brc.local domain
     src1 = get_zone(h_s)
     if src1 is None:
-        print('unable to define zone for:', h_s)
+        print(f'unable to define zone for: {h_s}')
         print('check address is correct')
         del_out_file()
         net_connect.disconnect()
@@ -240,7 +253,7 @@ for h_d in list_dst_hosts:
         h_d = h_d + '.brc.local'
     dst1 = get_zone(h_d)
     if dst1 is None:
-        print('unable to define zone for:', h_d)
+        print(f'unable to define zone for: {h_d}')
         print('check address is correct')
         del_out_file()
         net_connect.disconnect()
@@ -277,12 +290,12 @@ if policy_type == 'temporary':
     fd_month = '{:02d}'.format(future_date.month)
     fd_day = '{:02d}'.format(future_date.day)
     fd_hour = '{:02d}'.format(future_date.hour)
-    start_date = str(now_date.year) + '-' + now_month + '-' + now_day + '.' + now_hour + ':00'
-    stop_date = fd_year + '-' + fd_month + '-' + fd_day + '.23:59'
+    start_date = f'{str(now_date.year)}-{now_month}-{now_day}.{now_hour}:00'
+    stop_date = f'{fd_year}-{fd_month}-{fd_day}.23:59'
     #
     # create scheduler
     scheduler_name = policy_name  # scheduler name is tha same as policy name
-    set_sheduler = 'set schedulers scheduler ' + scheduler_name + ' start-date ' + start_date + ' stop-date ' + stop_date
+    set_sheduler = f'set schedulers scheduler {scheduler_name} start-date {start_date} stop-date {stop_date}'
     out_file.write(set_sheduler)
     out_file.write('\n\n')
 
@@ -294,86 +307,86 @@ for srcKey, srcValue in d_srcZoneIP.items():
         if re.search(r'^[^.]+$', srcZoneIP):  # match string not containing dot character
             srcZoneIP = srcZoneIP + '.brc.local'  # suggest brc.local domain
         if re.search(r'^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$', srcZoneIP):  # match domain name
-            out_file.write('set security zones security-zone ' + srcKey + ' address-book address ' + srcZoneIP + ' dns-name ' + srcZoneIP + '\n')
+            out_file.write(f'set security zones security-zone {srcKey} address-book address {srcZoneIP} dns-name {srcZoneIP}\n')
         if '0.0.0.0' in srcZoneIP:
             continue
         if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}', srcZoneIP):  # match network address
             srcZoneIP = re.sub(r'/', '_', srcZoneIP)
-            net_name = 'net_' + srcZoneIP
+            net_name = f'net_{srcZoneIP}'
             net_addr = srcZoneIP.split('_')[0]
             net_prefix = srcZoneIP.split('_')[1]
-            out_file.write('set security zones security-zone ' + srcKey + ' address-book address ' + net_name + ' ' + net_addr + '/' + net_prefix + '\n')
+            out_file.write(f'set security zones security-zone {srcKey} address-book address {net_name} {net_addr}/{net_prefix}\n')
         if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', srcZoneIP):  # match IP address
-            out_file.write('set security zones security-zone ' + srcKey + ' address-book address ' + srcZoneIP + ' ' + srcZoneIP + '/32\n')
+            out_file.write(f'set security zones security-zone {srcKey} address-book address {srcZoneIP} {srcZoneIP}/32\n')
 # create address book for destinations
 for dstKey, dstValue in d_dstZoneIP.items():
     dstZoneIPlist = d_dstZoneIP[dstKey].split(',')
     for dstZoneIP in dstZoneIPlist:
         if re.search(r'^[^.]+$', dstZoneIP):  # match string not containing dot character
-            dstZoneIP = dstZoneIP + '.brc.local'  # suggest brc.local domain
+            dstZoneIP = f'{dstZoneIP}.brc.local'  # suggest brc.local domain
         if re.search(r'^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$', dstZoneIP):  # match domain name
-            out_file.write('set security zones security-zone ' + dstKey + ' address-book address ' + dstZoneIP + ' dns-name ' + dstZoneIP + '\n')
+            out_file.write(f'set security zones security-zone {dstKey} address-book address {dstZoneIP} {dns-name} {dstZoneIP}\n')
         if '0.0.0.0' in dstZoneIP:
             continue
         if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}', dstZoneIP):  # match network address
             dstZoneIP = re.sub(r'/', '_', dstZoneIP)
-            net_name = 'net_' + dstZoneIP
+            net_name = f'net_{dstZoneIP}'
             net_addr = dstZoneIP.split('_')[0]
             net_prefix = dstZoneIP.split('_')[1]
-            out_file.write('set security zones security-zone ' + dstKey + ' address-book address ' + net_name + ' ' + net_addr + '/' + net_prefix + '\n')
+            out_file.write(f'set security zones security-zone {dstKey} address-book address {net_name} {net_addr}/{net_prefix}\n')
         if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', dstZoneIP):  # match IP address
-            out_file.write('set security zones security-zone ' + dstKey + ' address-book address ' + dstZoneIP + ' ' + dstZoneIP + '/32\n')
+            out_file.write(f'set security zones security-zone {dstKey} address-book address {dstZoneIP} {dstZoneIP}/32\n')
 
 out_file.write('\n')
 
 # create policies
 policy_count = 0
-except_zone_list = ['untrust', 'IBS', 'VPN']  # no traffic flow
+except_zone_list = ['untrust', 'IBS', 'VPN']
 for srcKey, srcValue in d_srcZoneIP.items():
     srcZoneIPlist = d_srcZoneIP[srcKey].split(',')
     for dstKey, dstValue in d_dstZoneIP.items():
         d_dstZoneIPlist = d_dstZoneIP[dstKey].split(',')
         if srcKey == dstKey:
-            print('addresses belongs to the same zone - ' + srcKey + ':\n' +
-                  'src: ' + srcValue + '\n' +
-                  'dst: ' + dstValue + '\n')
+            print(f'addresses belongs to the same zone - {srcKey}:\n'
+                  f'src: {srcValue}\n'
+                  f'dst: {dstValue}\n')
             continue
         if srcKey in except_zone_list and dstKey in except_zone_list:
             print(f'skip policy creation for zone pair: {srcKey} - {dstKey}')
             continue
         for srcZoneIP in srcZoneIPlist:  # policy source addresses
             if '0.0.0.0' in srcZoneIP:
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match source-address any\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match source-address any\n')
                 continue
             if '/' in srcZoneIP:  # check if IP is network address
                 srcZoneIP = 'net_' + re.sub(r'/', '_', srcZoneIP)
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match source-address ' + srcZoneIP + '\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match source-address {srcZoneIP}\n')
             else:
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match source-address ' + srcZoneIP + '\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match source-address {srcZoneIP}\n')
         for dstZoneIP in d_dstZoneIPlist:  # policy destination addresses
             if '0.0.0.0' in dstZoneIP:
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match destination-address any\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match destination-address any\n')
                 continue
             if '/' in dstZoneIP:  # check if IP is network address
                 dstZoneIP = 'net_' + re.sub(r'/', '_', dstZoneIP)
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match destination-address ' + dstZoneIP + '\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match destination-address {dstZoneIP}\n')
             else:
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match destination-address ' + dstZoneIP + '\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match destination-address {dstZoneIP}\n')
         for dst_app_rule in list_app:  # applications
             if re.match(r'\d{1,5}$', dst_app_rule):  # match 12345, suggest protocol TCP
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match application TCP-' + dst_app_rule.upper() + '\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match application TCP-{dst_app_rule.upper()}\n')
             elif re.match(r'\w{1,3}\W\d{1,5}', dst_app_rule):  # match tcp-12345, udp-12345, tcp-10-20, udp-50-60
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match application ' + dst_app_rule.upper() + '\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match application {dst_app_rule.upper()}\n')
             elif re.search(r'icmp', dst_app_rule, flags=re.IGNORECASE):
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match application junos-icmp-all\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match application junos-icmp-all\n')
             elif re.match(r'junos-', dst_app_rule):
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match application ' + dst_app_rule + '\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match application {dst_app_rule}\n')
             elif re.match(r'any', dst_app_rule, flags=re.IGNORECASE):
-                out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' match application any\n')
-        out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' then permit\n')
+                out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} match application any\n')
+        out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} then permit\n')
         policy_count += 1
         if policy_type == 'temporary':
-            out_file.write('set security policies from-zone ' + srcKey + ' to-zone ' + dstKey + ' policy ' + policy_name + ' scheduler-name ' + scheduler_name + '\n')
+            out_file.write(f'set security policies from-zone {srcKey} to-zone {dstKey} policy {policy_name} scheduler-name {scheduler_name}\n')
         out_file.write('\n')
 
 # out_file.write('commit\n')
@@ -386,22 +399,41 @@ if policy_count == 0:
     del_out_file()
     sys.exit(1)
 
-'''
+
 # load commands to device
-print('send config file', file_output, 'to device ...')
-net_connect.send_config_from_file(config_file=file_output)
-time.sleep(100)
-'''
+if commit == 'yes':
+    try:
+        print(f'send config file {file_output} to device ...')
+        cfg_snd_output = net_connect.send_config_from_file(config_file=file_output, exit_config_mode=False)
+        print('commit changes ...')
+        commit_changes = net_connect.commit()
+        print(cfg_snd_output)
+        print(commit_changes)
+        if 'configuration check-out failed' in cfg_snd_output:
+            print('Cannot commit changes! Rollback changes')
+            rlb_output = net_connect.send_config_set('rollback')
+            print(cfg_snd_output)
+            print(rlb_output)
+            net_connect.disconnect()
+            sys.exit(1)
+    except Exception as rsn:
+        msg_body = f'ERROR while commit on {junos1["host"]}\n\n{str(rsn)}'
+        print(msg_body)
+        print('rollback changes')
+        net_connect.send_command('rollback')
+        net_connect.disconnect()
+        print('rollback completed!')
+        sys.exit(1)
 
 '''
 try:
     print('commit changes ...')
-    cmt = net_connect.commit()  # not working with SRX550/650 clusters
+    cmt = net_connect.commit()
     print(cmt)
-    time.sleep(120)
+    time.sleep(10)
     print('commit copmleted!')
 except Exception as rsn:
-    msg_body = 'ERROR while commit on ' + junos1['host'] + '\n\n' + str(rsn)
+    msg_body = f'ERROR while commit on {junos1["host"]}\n\n{str(rsn)}'
     print(msg_body)
     print('rollback changes')
     net_connect.send_command('rollback')
@@ -416,6 +448,6 @@ net_connect.disconnect()
 fo = open(file_output, 'r').read()
 pyperclip.copy(fo)
 
-print(policy_count, 'policies created')
+print(f'{policy_count} policies created')
 
 print('done!')
