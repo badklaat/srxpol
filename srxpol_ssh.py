@@ -6,7 +6,6 @@ import re, os, sys, socket
 import getopt
 from netmiko import Netmiko
 import time
-import pyperclip
 
 
 def func_random_str(str_length=8):  # Generate a random string of letters and digits
@@ -161,7 +160,6 @@ except Exception as conn:
     ex_msg = ex_templ.format(type(conn).__name__, conn.args)
     print(ex_msg)
     del_out_file()
-    time.sleep(5)
     sys.exit(1)
 
 
@@ -407,28 +405,7 @@ if commit == 'yes':
         print('rollback completed!')
         sys.exit(1)
 
-'''
-try:
-    print('commit changes ...')
-    cmt = net_connect.commit()
-    print(cmt)
-    time.sleep(10)
-    print('commit copmleted!')
-except Exception as rsn:
-    msg_body = f'ERROR while commit on {junos1["host"]}\n\n{str(rsn)}'
-    print(msg_body)
-    print('rollback changes')
-    net_connect.send_command('rollback')
-    net_connect.disconnect()
-    print('rollback completed!')
-    sys.exit(1)
-'''
-
 net_connect.disconnect()
-
-# copy file content to clipboard
-fo = open(file_output, 'r').read()
-pyperclip.copy(fo)
 
 print(f'{policy_count} policies created')
 
