@@ -9,12 +9,6 @@ import time
 import pyperclip
 
 
-# generate ready to use policy with mixed zones and scheduler
-# v3:
-# do not create policy in DC phy if src zone IBS and dst untrust
-# do not create policy in DC4 if src zone VPN and dst untrust
-# use f-strings
-
 def func_random_str(str_length=8):  # Generate a random string of letters and digits
     letters_and_digits = string.ascii_letters + string.digits
     return ''.join(random.choice(letters_and_digits) for _ in range(str_length))
@@ -147,27 +141,10 @@ except FileNotFoundError:
     del_out_file()
     sys.exit(1)
 
-print('Choose device to connect:\n'
-      '  1. dc2-srx550 (10.2.100.5)\n'
-      '  2. dc4-vSRX (172.20.251.8)\n'
-      '  3. Enter your address\n')
-input1 = input('Enter number [1]: ')
-if input1 == '1':
-    device_ip = '10.2.100.5'
-elif input1 == '2':
-    device_ip = '172.20.251.8'
-elif input1 == '':
-    device_ip = '10.2.100.5'
-elif input1 == '3':
-    device_ip = input('Enter IP address or DNS name: ')
-else:
-    print(f'incorrect choise! {input1}')
-    #time.sleep(5)
-    sys.exit(1)
+device_ip = input('Enter IP address or DNS name to connect to: ')
 
 junos1 = {
     "host": device_ip,
-#    "host": 'dc2-srx550',
     "username": credentials[user],
     "password": credentials[pwd],
     "device_type": "juniper",
@@ -226,12 +203,14 @@ def get_zone(addr_z):
     except (AddressValueError, ValueError):
         pass
 
+# define default domain name
+df_domain_name = '.brc.local'
 
 # create dictionary for sources
 d_srcZoneIP = dict()
 for h_s in list_src_hosts:
     if re.search(r'^[^.]+$', h_s):  # match string not containing dot character
-        h_s = h_s + '.brc.local'  # suggest brc.local domain
+        h_s = h_s + df_domain_name  # suggest default domain
     src1 = get_zone(h_s)
     if src1 is None:
         print(f'unable to define zone for: {h_s}')
@@ -250,7 +229,7 @@ for h_s in list_src_hosts:
 d_dstZoneIP = dict()
 for h_d in list_dst_hosts:
     if re.search(r'^[^.]+$', h_d):
-        h_d = h_d + '.brc.local'
+        h_d = h_d + df_domain_name
     dst1 = get_zone(h_d)
     if dst1 is None:
         print(f'unable to define zone for: {h_d}')
@@ -274,7 +253,7 @@ if policy_type == 'temporary':
     now_day = '{:02d}'.format(now_date.day)
     now_hour = '{:02d}'.format(now_date.hour)
     #
-    # add 1 week to current date
+    # add 1 week to the current date
     # Other Parameters you can pass in to timedelta:
     # days, seconds, microseconds,
     # milliseconds, minutes, hours, weeks
@@ -294,7 +273,7 @@ if policy_type == 'temporary':
     stop_date = f'{fd_year}-{fd_month}-{fd_day}.23:59'
     #
     # create scheduler
-    scheduler_name = policy_name  # scheduler name is tha same as policy name
+    scheduler_name = policy_name  # scheduler name is the same as policy name
     set_sheduler = f'set schedulers scheduler {scheduler_name} start-date {start_date} stop-date {stop_date}'
     out_file.write(set_sheduler)
     out_file.write('\n\n')
@@ -305,7 +284,7 @@ for srcKey, srcValue in d_srcZoneIP.items():
     srcZoneIPlist = d_srcZoneIP[srcKey].split(',')
     for srcZoneIP in srcZoneIPlist:
         if re.search(r'^[^.]+$', srcZoneIP):  # match string not containing dot character
-            srcZoneIP = srcZoneIP + '.brc.local'  # suggest brc.local domain
+            srcZoneIP = srcZoneIP + df_domain_name  # suggest default domain
         if re.search(r'^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$', srcZoneIP):  # match domain name
             out_file.write(f'set security zones security-zone {srcKey} address-book address {srcZoneIP} dns-name {srcZoneIP}\n')
         if '0.0.0.0' in srcZoneIP:
@@ -323,7 +302,7 @@ for dstKey, dstValue in d_dstZoneIP.items():
     dstZoneIPlist = d_dstZoneIP[dstKey].split(',')
     for dstZoneIP in dstZoneIPlist:
         if re.search(r'^[^.]+$', dstZoneIP):  # match string not containing dot character
-            dstZoneIP = f'{dstZoneIP}.brc.local'  # suggest brc.local domain
+            dstZoneIP = f'{dstZoneIP}{df_domain_name}'  # suggest default domain
         if re.search(r'^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$', dstZoneIP):  # match domain name
             out_file.write(f'set security zones security-zone {dstKey} address-book address {dstZoneIP} {dns-name} {dstZoneIP}\n')
         if '0.0.0.0' in dstZoneIP:
@@ -341,16 +320,19 @@ out_file.write('\n')
 
 # create policies
 policy_count = 0
-except_zone_list = ['untrust', 'IBS', 'VPN']
+except_zone_list = ['']  # skip policy creation for these zone pairs
 for srcKey, srcValue in d_srcZoneIP.items():
     srcZoneIPlist = d_srcZoneIP[srcKey].split(',')
     for dstKey, dstValue in d_dstZoneIP.items():
         d_dstZoneIPlist = d_dstZoneIP[dstKey].split(',')
+
+        # comment this 'if' block if you want to create policies for addresses belonging to the same zone
         if srcKey == dstKey:
             print(f'addresses belongs to the same zone - {srcKey}:\n'
                   f'src: {srcValue}\n'
                   f'dst: {dstValue}\n')
             continue
+
         if srcKey in except_zone_list and dstKey in except_zone_list:
             print(f'skip policy creation for zone pair: {srcKey} - {dstKey}')
             continue
