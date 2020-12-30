@@ -18,13 +18,15 @@ policy_name = 'TMP_' + rnd_string
 policy_type = 'temporary'
 delta_days = None
 commit = 'no'  # no commit by default
+skip_same_zone = 'no'
 
 
 def print_help():
     print(f'unknown options!\n'
           f'usage:\n'
-          f'{sys.argv[0]} [-p <policy_name>] [-d <days>] [-c]\n'
-          f'-c: commit changes\n')
+          f'{sys.argv[0]} [-p <policy_name>] [-d <days>] [-c] [-s]\n'
+          f'-c: commit changes\n'
+          f'-s: skip policy creation if src and dst addresses belongs to the same zone\n')
 
 
 def main(argv):
@@ -32,8 +34,9 @@ def main(argv):
     global policy_type
     global delta_days
     global commit
+    global skip_same_zone
     try:
-        opts, args = getopt.getopt(argv, "hp:d:c")
+        opts, args = getopt.getopt(argv, "hp:d:cs")
     except getopt.GetoptError:
         print_help()
         sys.exit(1)
@@ -48,6 +51,8 @@ def main(argv):
             delta_days = arg
         elif opt == '-c':  # commit changes
             commit = 'yes'
+        elif opt == '-s':  # skip same zone policy
+            skip_same_zone = 'yes'
 
 
 main(sys.argv[1:])  # handle script arguments
@@ -140,7 +145,8 @@ except FileNotFoundError:
     del_out_file()
     sys.exit(1)
 
-device_ip = input('Enter IP address or DNS name to connect to: ')
+#device_ip = input('Enter IP address or DNS name to connect to: ')
+device_ip = '10.12.5.100'
 
 junos1 = {
     "host": device_ip,
@@ -185,11 +191,12 @@ def get_zone(addr_z):
         command2 = "show interfaces " + str(via_if.group(0)) + ' | match Security:'
         output2 = net_connect.send_command(command2)
         zone_name = output2.split(':')[2].strip()
-    except (AddressValueError, ValueError):
-        print(f'incorrect address: {addr_z}')
+    except (AddressValueError, ValueError, AttributeError):
+        print(f'incorrect address or no route to {addr_z}')
         del_out_file()
         net_connect.disconnect()
         sys.exit(1)
+
     #
     try:
         if re.search(r'.+/32$', net):  # if address is junos local it return /32 address, network address not shown
@@ -302,7 +309,7 @@ for dstKey, dstValue in d_dstZoneIP.items():
         if re.search(r'^[^.]+$', dstZoneIP):  # match string not containing dot character
             dstZoneIP = f'{dstZoneIP}{df_domain_name}'  # suggest default domain
         if re.search(r'^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$', dstZoneIP):  # match domain name
-            out_file.write(f'set security zones security-zone {dstKey} address-book address {dstZoneIP} {dns-name} {dstZoneIP}\n')
+            out_file.write(f'set security zones security-zone {dstKey} address-book address {dstZoneIP} dns-name {dstZoneIP}\n')
         if '0.0.0.0' in dstZoneIP:
             continue
         if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}', dstZoneIP):  # match network address
@@ -324,12 +331,12 @@ for srcKey, srcValue in d_srcZoneIP.items():
     for dstKey, dstValue in d_dstZoneIP.items():
         d_dstZoneIPlist = d_dstZoneIP[dstKey].split(',')
 
-        # comment this 'if' block if you want to create policies for addresses belonging to the same zone
-        if srcKey == dstKey:
-            print(f'addresses belongs to the same zone - {srcKey}:\n'
-                  f'src: {srcValue}\n'
-                  f'dst: {dstValue}\n')
-            continue
+        if skip_same_zone == 'yes':
+            if srcKey == dstKey:
+                print(f'addresses belongs to the same zone - {srcKey}:\n'
+                    f'src: {srcValue}\n'
+                    f'dst: {dstValue}\n')
+                continue
 
         if srcKey in except_zone_list and dstKey in except_zone_list:
             print(f'skip policy creation for zone pair: {srcKey} - {dstKey}')
