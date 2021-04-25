@@ -1,4 +1,4 @@
-import ipaddress
+from ipaddress import *
 import random
 import string
 import datetime
@@ -26,7 +26,7 @@ def del_out_file():
     open(file_output, 'w').close()
 
 
-def get_zone(addr_z):
+def get_zone(net_connect, addr_z):
     if re.search(r'^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$', addr_z):  # match domain name
         try:
             dns_ip2 = socket.gethostbyname(addr_z)  # resolve IP domain name
@@ -35,7 +35,7 @@ def get_zone(addr_z):
             del_out_file()
             net_connect.disconnect()
             sys.exit(1)
-        get_dns = get_zone(dns_ip2)
+        get_dns = get_zone(net_connect, dns_ip2)
         return addr_z, get_dns[1]
     #
     try:
@@ -66,7 +66,7 @@ def get_zone(addr_z):
         pass
 
 
-def main()
+def main():
     rnd_string = func_random_str()
     policy_name = 'TMP_' + rnd_string
     policy_type = 'temporary'
@@ -129,8 +129,6 @@ def main()
         time.sleep(5)
         sys.exit(1)
 
-    hosts_list.close()
-
     try:
         os.remove(file_output)
     except FileNotFoundError:
@@ -142,20 +140,20 @@ def main()
     for dst_app in list_app:
         if re.match(r'\d{1,5}$', dst_app):  # match 12345
             out_file.write(f'set applications application TCP-{dst_app} protocol tcp destination-port {dst_app}\n')
-        elif re.match(r'(tcp|udp)+-\d{1,5}-\d{1,5}$', dst_app, flags=re.IGNORECASE):  # match tcp-12345-12400
+        elif re.match(r'(tcp|udp)+-\d{1,5}-\d{1,5}$', dst_app, flags = re.IGNORECASE):  # match tcp-12345-12400
             dproto = (dst_app.split('-')[0]).lower()
             dport_s = dst_app.split('-')[1]
             dport_e = dst_app.split('-')[2]
             out_file.write(f'set applications application {dst_app.upper()} protocol {dproto} destination-port {dport_s}-{dport_e}\n')
-        elif re.match(r'(tcp|udp)-\d{1,5}$', dst_app, flags=re.IGNORECASE):  # match tcp-12345
+        elif re.match(r'(tcp|udp)-\d{1,5}$', dst_app, flags = re.IGNORECASE):  # match tcp-12345
             dproto = (dst_app.split('-')[0]).lower()
             dport_s = dst_app.split('-')[1]
             out_file.write(f'set applications application {dst_app.upper()} protocol {dproto} destination-port {dport_s}\n')
-        elif re.search(r'icmp', dst_app, flags=re.IGNORECASE):
+        elif re.search(r'icmp', dst_app, flags = re.IGNORECASE):
             continue
         elif re.match(r'junos-', dst_app):
             continue
-        elif re.match(r'any', dst_app, flags=re.IGNORECASE):
+        elif re.match(r'any', dst_app, flags = re.IGNORECASE):
             continue
         else:
             print(f'unknown application: {dst_app}')
@@ -176,22 +174,23 @@ def main()
 
     # connecting to device
     try:
-        print(f'connecting to {junos1["host"]}')
+        print(f'connecting to {junos1["host"]} ... ', end = '')
         net_connect = Netmiko(**junos1)
         dev_prompt = net_connect.find_prompt()
     except Exception as conn:
-        ex_templ = "An exception of type {0} occurred. Arguments:\n{1!r}"
+        ex_templ = "\nAn exception of type {0} occurred. Arguments:\n{1!r}"
         ex_msg = ex_templ.format(type(conn).__name__, conn.args)
         print(ex_msg)
         del_out_file()
         sys.exit(1)
+    print('ok')
 
     # create dictionary for sources
     d_srcZoneIP = dict()
     for h_s in list_src_hosts:
         if re.search(r'^[^.]+$', h_s):  # match string not containing dot character
             h_s = h_s + df_domain_name  # suggest default domain
-        src1 = get_zone(h_s)
+        src1 = get_zone(net_connect, h_s)
         if src1 is None:
             print(f'unable to define zone for: {h_s}')
             print('check address is correct')
@@ -210,7 +209,7 @@ def main()
     for h_d in list_dst_hosts:
         if re.search(r'^[^.]+$', h_d):
             h_d = h_d + df_domain_name
-        dst1 = get_zone(h_d)
+        dst1 = get_zone(net_connect, h_d)
         if dst1 is None:
             print(f'unable to define zone for: {h_d}')
             print('check address is correct')
@@ -234,7 +233,7 @@ def main()
         now_hour = '{:02d}'.format(now_date.hour)
         #
         # add 1 week to the current date
-        # Other Parameters you can pass in to timedelta:
+        # Other parameters you can pass in to timedelta:
         # days, seconds, microseconds,
         # milliseconds, minutes, hours, weeks
         if delta_days is None:  # if no option -d specified
@@ -357,14 +356,14 @@ def main()
         print('0 policies need to be created')
         net_connect.disconnect()
         del_out_file()
-        sys.exit(1)
+        sys.exit()
 
 
     # load commands to device
     if commit == 'yes':
         try:
             print(f'send config file {file_output} to device ...')
-            cfg_snd_output = net_connect.send_config_from_file(config_file=file_output, exit_config_mode=False)
+            cfg_snd_output = net_connect.send_config_from_file(config_file = file_output, exit_config_mode = False)
             print('commit changes ...')
             commit_changes = net_connect.commit()
             print(cfg_snd_output)
@@ -392,5 +391,5 @@ def main()
     print('done!')
 
 
-if __name__ == 'main':
+if __name__ == '__main__':
     main()
